@@ -47,6 +47,8 @@
 #define DEVICE_ROLE_BROADCAST_SOURCE        0
 #define DEVICE_ROLE_BROADCAST_DELEGATOR     1
 
+#define BIS_SYNC_NO_PREFERENCE              0xffffffff
+
 #define CONTEXT_TYPE_UNSPECIFIED            0x0001
 #define CONTEXT_TYPE_CONVERSATIONAL         0x0002
 #define CONTEXT_TYPE_MEDIA                  0x0004
@@ -422,6 +424,30 @@ get_context_type_string(uint16_t context_type_num)
 }
 
 static void
+subgroup_click_event_cb(lv_event_t *e)
+{
+    lv_obj_t *obj = lv_event_get_target(e);
+    lv_obj_t *label = lv_obj_get_child(obj, 0);
+    char *bis_idx_ascii = lv_label_get_text(label);
+    int16_t subgroup_idx = atoi(bis_idx_ascii + 9);
+
+    if (paired_delegators[0].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        if (synced_source.is_added) {
+            server_modify_source(&paired_delegators[0], subgroup_idx, BIS_SYNC_NO_PREFERENCE, PA_SYNC_SYNCHRONIZE_TO_PA_PAST_AVAILABLE);
+        } else {
+            server_add_new_source(&paired_delegators[0], synced_source.list_id, subgroup_idx, BIS_SYNC_NO_PREFERENCE);
+        }
+    }
+    if (paired_delegators[1].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        if (synced_source.is_added) {
+            server_modify_source(&paired_delegators[1], subgroup_idx, BIS_SYNC_NO_PREFERENCE, PA_SYNC_SYNCHRONIZE_TO_PA_PAST_AVAILABLE);
+        } else {
+            server_add_new_source(&paired_delegators[1], synced_source.list_id, subgroup_idx, BIS_SYNC_NO_PREFERENCE);
+        }
+    }
+}
+
+static void
 create_new_subgroups_list(void)
 {
     int i;
@@ -439,9 +465,11 @@ create_new_subgroups_list(void)
     subgroups_list_init();
 
     for(i = 0; i < synced_source.num_subgroups; i++) {
-        obj = lv_obj_create(gui.subgroups_list);
+        obj = lv_btn_create(gui.subgroups_list);
         lv_obj_set_size(obj, LV_PCT(100), LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
+        lv_obj_add_event_cb(obj, subgroup_click_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_set_style_bg_color(obj, lv_color_hex(COLOR_DEVICE), 0);
         label = lv_label_create(obj);
         lv_label_set_text_fmt(label, "Subgroup %d", i);
 
