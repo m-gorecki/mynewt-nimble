@@ -87,7 +87,6 @@ struct paired_delegator {
 
 struct bis {
     uint8_t idx;
-    uint8_t associated_subgroup;
     lv_obj_t *list_entry;
 };
 
@@ -306,7 +305,6 @@ parse_synced_source_base(const uint8_t *base)
 
         for (j = 0; j < synced_source.subgroups[i].num_bis; j++) {
             synced_source.subgroups[i].bises[j].idx = *base;
-            synced_source.subgroups[i].bises[j].associated_subgroup = i;
             /* Skip Codec_Specific_Configuration */
             base += base[1] + 2;
         }
@@ -429,11 +427,34 @@ broadcast_assistant_transfer_syncinfo(uint8_t source_id, uint8_t paired_delegato
                                               paired_delegators[paired_delegator_id].conn_handle, (uint16_t)source_id);
 }
 
+static uint8_t
+bis_get_associated_subgroup_idx(uint8_t bis_idx)
+{
+    int i;
+    int j;
+
+    for(i = 0; i < synced_source.num_subgroups; i++) {
+        for(j = 0; j < synced_source.subgroups[i].num_bis; j++) {
+            if (bis_idx == synced_source.subgroups[i].bises[j].idx) {
+                return i;
+            }
+        }
+    }
+    return 0xff;
+}
+
 static void
 server_modify_source(struct paired_delegator *delegator, uint32_t bis_sync, uint8_t pa_sync)
 {
     uint8_t data_to_send[255];
     uint16_t data_len;
+    uint8_t subgroup_idx;
+
+    subgroup_idx = bis_get_associated_subgroup_idx((uint8_t) bis_sync);
+
+    if (subgroup_idx == 0xff && pa_sync != PA_SYNC_NOT_SYNCHRONIZE) {
+        return;
+    }
 
     data_to_send[0] = BROADCAST_ASSISTANT_MODIFY_SOURCE_OPCODE;
 
@@ -452,12 +473,11 @@ server_modify_source(struct paired_delegator *delegator, uint32_t bis_sync, uint
     /* BIS_Sync */
     memcpy(&data_to_send[6], &bis_sync, 4);
 
-    /* TODO: right now we only support modifying 0th subgroup */
     /* metadata */
-    data_to_send[10] = synced_source.subgroups[0].metadata_len;
-    memcpy(&data_to_send[11], synced_source.subgroups[0].metadata, synced_source.subgroups[0].metadata_len);
+    data_to_send[10] = synced_source.subgroups[subgroup_idx].metadata_len;
+    memcpy(&data_to_send[11], synced_source.subgroups[subgroup_idx].metadata, synced_source.subgroups[subgroup_idx].metadata_len);
 
-    data_len = 11 + synced_source.subgroups->metadata_len;
+    data_len = 11 + synced_source.subgroups[subgroup_idx].metadata_len;
 
     ble_gattc_write_no_rsp_flat(delegator->conn_handle, delegator->scan_control_point_h, data_to_send, data_len);
 }
@@ -467,6 +487,13 @@ server_add_new_source(struct paired_delegator *delegator, uint8_t source_list_id
 {
     uint8_t data_to_send[255];
     uint16_t data_len;
+    uint8_t subgroup_idx;
+
+    subgroup_idx = bis_get_associated_subgroup_idx((uint8_t) bis_sync);
+
+    if (subgroup_idx == 0xff) {
+        return;
+    }
 
     data_to_send[0] = BROADCAST_ASSISTANT_ADD_SOURCE_OPCODE;
 
@@ -494,12 +521,11 @@ server_add_new_source(struct paired_delegator *delegator, uint8_t source_list_id
     /* BIS_Sync */
     put_le32(&data_to_send[16], bis_sync);
 
-    /* TODO: right now we only support adding 0th subgroup */
     /* metadata */
-    data_to_send[20] = synced_source.subgroups[0].metadata_len;
-    memcpy(&data_to_send[21], synced_source.subgroups[0].metadata, synced_source.subgroups[0].metadata_len);
+    data_to_send[20] = synced_source.subgroups[subgroup_idx].metadata_len;
+    memcpy(&data_to_send[21], synced_source.subgroups[subgroup_idx].metadata, synced_source.subgroups[subgroup_idx].metadata_len);
 
-    data_len = 21 + synced_source.subgroups[0].metadata_len;
+    data_len = 21 + synced_source.subgroups[subgroup_idx].metadata_len;
 
     ble_gattc_write_flat(delegator->conn_handle, delegator->scan_control_point_h, data_to_send, data_len, NULL, NULL);
 }
