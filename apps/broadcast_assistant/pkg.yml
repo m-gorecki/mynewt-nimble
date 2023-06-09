@@ -34,3 +34,4 @@ pkg.deps:
     - "@apache-mynewt-nimble/nimble/host/store/config"
     - "@apache-mynewt-core/hw/drivers/display/lvgl"
     - "@apache-mynewt-core/sys/shell"
+    - "@apache-mynewt-nimble/apps/broadcast_assistant/pwm_backlight"

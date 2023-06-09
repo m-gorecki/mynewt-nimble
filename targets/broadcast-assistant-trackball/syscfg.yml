@@ -21,9 +21,10 @@ syscfg.vals:
     LVGL_ST7735S: 0
     LVGL_ST7789: 0
     LVGL_STMPE610: 0
-    LVGL_XPT2046: 0
+    LVGL_XPT2046: 1
     LVGL_TRACKBALL: 1
 
+    PWM_0: 1
 syscfg.vals.LVGL_ST7735S:
     LCD_ITF: spi
     LCD_SPI_DEV_NAME: '"spi1"'

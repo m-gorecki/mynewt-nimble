@@ -1,0 +1,6 @@
+syscfg.defs:
+    PWM_BACKLIGHT_BUTTON:
+        value: BUTTON_1
+
+syscfg.restrictions:
+    - PWM_0

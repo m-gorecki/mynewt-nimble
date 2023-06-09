@@ -1,0 +1,8 @@
+pkg.name: "apps/broadcast_assistant/pwm_backlight"
+pkg.description: "PWM backlight"
+pkg.keywords:
+
+pkg.deps:
+
+pkg.init:
+    pwm_backlight_init: 1000
