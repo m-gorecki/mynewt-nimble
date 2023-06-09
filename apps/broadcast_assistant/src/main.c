@@ -47,6 +47,19 @@
 #define DEVICE_ROLE_BROADCAST_SOURCE        0
 #define DEVICE_ROLE_BROADCAST_DELEGATOR     1
 
+#define CONTEXT_TYPE_UNSPECIFIED            0x0001
+#define CONTEXT_TYPE_CONVERSATIONAL         0x0002
+#define CONTEXT_TYPE_MEDIA                  0x0004
+#define CONTEXT_TYPE_GAME                   0x0008
+#define CONTEXT_TYPE_INSTRUCTIONAL          0x0010
+#define CONTEXT_TYPE_VOICE_ASSISTANTS       0x0020
+#define CONTEXT_TYPE_LIVE                   0x0040
+#define CONTEXT_TYPE_SOUND_EFFECTS          0x0080
+#define CONTEXT_TYPE_NOTIFICATIONS          0x0100
+#define CONTEXT_TYPE_RINGTONE               0x0200
+#define CONTEXT_TYPE_ALERTS                 0x0400
+#define CONTEXT_TYPE_EMERGENCY_ALARM        0x0800
+
 static const ble_uuid16_t uuid_broadcast_audio_scan_svc = BLE_UUID16_INIT(0x184F);
 static const ble_uuid16_t uuid_broadcast_audio_scan_control_point_chr = BLE_UUID16_INIT(0x2BC7);
 static const ble_uuid16_t uuid_broadcast_receive_state_chr = BLE_UUID16_INIT(0x2BC8);
@@ -352,6 +365,39 @@ bis_click_event_cb(lv_event_t *e)
     }
 }
 
+static const char*
+get_context_type_string(uint16_t context_type_num)
+{
+    switch (context_type_num){
+    case CONTEXT_TYPE_UNSPECIFIED:
+        return "Unspecified";
+    case CONTEXT_TYPE_CONVERSATIONAL:
+        return "Conversational";
+    case CONTEXT_TYPE_MEDIA:
+        return "Media";
+    case CONTEXT_TYPE_GAME:
+        return "Game";
+    case CONTEXT_TYPE_INSTRUCTIONAL:
+        return "Instructional";
+    case CONTEXT_TYPE_VOICE_ASSISTANTS:
+        return "Voice Assistants";
+    case CONTEXT_TYPE_LIVE:
+        return "Live";
+    case CONTEXT_TYPE_SOUND_EFFECTS:
+        return "Sound FX";
+    case CONTEXT_TYPE_NOTIFICATIONS:
+        return "Notifications";
+    case CONTEXT_TYPE_RINGTONE:
+        return "Ringtone";
+    case CONTEXT_TYPE_ALERTS:
+        return "Alerts";
+    case CONTEXT_TYPE_EMERGENCY_ALARM:
+        return "Emergency Alarm";
+    default:
+        return "";
+    }
+}
+
 static void
 create_new_subgroups_list(void)
 {
@@ -388,7 +434,7 @@ create_new_subgroups_list(void)
             switch (ltv_struct_type) {
             case LTV_STRUCT_STREAMING_AUDIO_CONTEXT:
                 label = lv_label_create(obj);
-                lv_label_set_text_fmt(label, "Audio context: %d", get_le16(&synced_source.subgroups[i].metadata[buff_ptr]));
+                lv_label_set_text_fmt(label, "Audio context:\n %s", get_context_type_string(get_le16(&synced_source.subgroups[i].metadata[buff_ptr])));
                 break;
             case LTV_STRUCT_PROGRAM_INFO:
                 label = lv_label_create(obj);
