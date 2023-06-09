@@ -112,6 +112,7 @@ static uint8_t g_own_addr_type;
 
 static uint8_t scanning = 0;
 static uint8_t create_new_subgroups_list_flag = 1;
+static uint8_t remove_source_flag = 0;
 static uint8_t sort_suspended = 0;
 static struct display_gui gui;
 static struct broadcast_device_data devices[MAX_DEVICES];
@@ -136,6 +137,7 @@ static void start_scan(void);
 static void stop_scan(void);
 static void server_add_new_source(struct paired_delegator *delegator, uint8_t source_list_id, uint32_t bis_sync);
 static void server_modify_source(struct paired_delegator *delegator, uint32_t bis_sync, uint8_t pa_sync);
+static void server_remove_source(struct paired_delegator *delegator);
 
 static void
 switch_to_subgroups_list(void)
@@ -712,12 +714,22 @@ connect_cb_func(struct ble_gap_event *event, void *arg)
             /* This means that source was removed from server */
             if (event->notify_rx.om->om_len == 0) {
                 synced_source.is_added = 0;
+                return 0;
             }
             switch (*(event->notify_rx.om->om_data + 12)) {
             case 0x00:
                 if (synced_source.is_server_synced) {
                     untag_bises();
                     synced_source.is_server_synced = 0;
+                }
+                if (remove_source_flag) {
+                    if (paired_delegators[0].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+                        server_remove_source(&paired_delegators[0]);
+                    }
+                    if (paired_delegators[1].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+                        server_remove_source(&paired_delegators[1]);
+                    }
+                    remove_source_flag = 0;
                 }
                 break;
             case 0x01:
@@ -1068,6 +1080,17 @@ static void
 return_btn_event_cb(lv_event_t *e)
 {
     int rc;
+
+    if (synced_source.is_added) {
+        remove_source_flag = 1;
+        if (paired_delegators[0].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+            server_unsync_source(&paired_delegators[0]);
+        }
+        if (paired_delegators[1].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+            server_unsync_source(&paired_delegators[1]);
+        }
+    }
+
     rc = ble_gap_periodic_adv_sync_terminate(synced_source.sync_handle);
     printf("Periodic advertising stop rc = %d\n", rc);
     memset(&synced_source, 0, sizeof(synced_source));
