@@ -148,8 +148,8 @@ static struct paired_delegator paired_delegators[2] = {
 
 static void start_scan(void);
 static void stop_scan(void);
-static void server_add_new_source(struct paired_delegator *delegator, uint8_t source_list_id, uint32_t bis_sync);
-static void server_modify_source(struct paired_delegator *delegator, uint32_t bis_sync, uint8_t pa_sync);
+static void server_add_new_source(struct paired_delegator *delegator, uint8_t source_list_id, int8_t subgroup_idx, uint32_t bis_sync);
+static void server_modify_source(struct paired_delegator *delegator, int8_t subgroup_idx, uint32_t bis_sync, uint8_t pa_sync);
 static void server_remove_source(struct paired_delegator *delegator);
 
 static void
@@ -329,30 +329,53 @@ parse_synced_source_base(const uint8_t *base)
 static void
 server_unsync_source(struct paired_delegator *delegator)
 {
-    server_modify_source(delegator, 0, PA_SYNC_NOT_SYNCHRONIZE);
+    server_modify_source(delegator, 0, 0, PA_SYNC_NOT_SYNCHRONIZE);
+}
+
+static int8_t
+bis_get_associated_subgroup_idx(uint8_t bis_idx)
+{
+    int i;
+    int j;
+
+    for(i = 0; i < synced_source.num_subgroups; i++) {
+        for(j = 0; j < synced_source.subgroups[i].num_bis; j++) {
+            if (bis_idx == synced_source.subgroups[i].bises[j].idx) {
+                return i;
+            }
+        }
+    }
+    return -1;
 }
 
 static void
 bis_click_event_cb(lv_event_t *e)
 {
+    int16_t subgroup_idx;
     lv_obj_t *obj = lv_event_get_target(e);
     lv_obj_t *label = lv_obj_get_child(obj, 1);
     char *bis_idx_ascii = lv_label_get_text(label);
     uint32_t bis_idx = atoi(bis_idx_ascii);
 
+    subgroup_idx = bis_get_associated_subgroup_idx((uint8_t) bis_idx);
+
+    if (subgroup_idx == -1) {
+        return;
+    }
+
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
         if (paired_delegators[0].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
             if (synced_source.is_added) {
-                server_modify_source(&paired_delegators[0], bis_idx, PA_SYNC_SYNCHRONIZE_TO_PA_PAST_AVAILABLE);
+                server_modify_source(&paired_delegators[0], subgroup_idx, bis_idx, PA_SYNC_SYNCHRONIZE_TO_PA_PAST_AVAILABLE);
             } else {
-                server_add_new_source(&paired_delegators[0], synced_source.list_id, bis_idx);
+                server_add_new_source(&paired_delegators[0], synced_source.list_id, subgroup_idx, bis_idx);
             }
         }
         if (paired_delegators[1].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
             if (synced_source.is_added) {
-                server_modify_source(&paired_delegators[1], bis_idx, PA_SYNC_SYNCHRONIZE_TO_PA_PAST_AVAILABLE);
+                server_modify_source(&paired_delegators[1], subgroup_idx, bis_idx, PA_SYNC_SYNCHRONIZE_TO_PA_PAST_AVAILABLE);
             } else {
-                server_add_new_source(&paired_delegators[1], synced_source.list_id, bis_idx);
+                server_add_new_source(&paired_delegators[1], synced_source.list_id, subgroup_idx, bis_idx);
             }
         }
     } else if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {
@@ -475,34 +498,11 @@ broadcast_assistant_transfer_syncinfo(uint8_t source_id, uint8_t paired_delegato
                                               paired_delegators[paired_delegator_id].conn_handle, (uint16_t)source_id);
 }
 
-static uint8_t
-bis_get_associated_subgroup_idx(uint8_t bis_idx)
-{
-    int i;
-    int j;
-
-    for(i = 0; i < synced_source.num_subgroups; i++) {
-        for(j = 0; j < synced_source.subgroups[i].num_bis; j++) {
-            if (bis_idx == synced_source.subgroups[i].bises[j].idx) {
-                return i;
-            }
-        }
-    }
-    return 0xff;
-}
-
 static void
-server_modify_source(struct paired_delegator *delegator, uint32_t bis_sync, uint8_t pa_sync)
+server_modify_source(struct paired_delegator *delegator, int8_t subgroup_idx, uint32_t bis_sync, uint8_t pa_sync)
 {
     uint8_t data_to_send[255];
     uint16_t data_len;
-    uint8_t subgroup_idx;
-
-    subgroup_idx = bis_get_associated_subgroup_idx((uint8_t) bis_sync);
-
-    if (subgroup_idx == 0xff && pa_sync != PA_SYNC_NOT_SYNCHRONIZE) {
-        return;
-    }
 
     data_to_send[0] = BROADCAST_ASSISTANT_MODIFY_SOURCE_OPCODE;
 
@@ -531,17 +531,10 @@ server_modify_source(struct paired_delegator *delegator, uint32_t bis_sync, uint
 }
 
 static void
-server_add_new_source(struct paired_delegator *delegator, uint8_t source_list_id, uint32_t bis_sync)
+server_add_new_source(struct paired_delegator *delegator, uint8_t source_list_id, int8_t subgroup_idx, uint32_t bis_sync)
 {
     uint8_t data_to_send[255];
     uint16_t data_len;
-    uint8_t subgroup_idx;
-
-    subgroup_idx = bis_get_associated_subgroup_idx((uint8_t) bis_sync);
-
-    if (subgroup_idx == 0xff) {
-        return;
-    }
 
     data_to_send[0] = BROADCAST_ASSISTANT_ADD_SOURCE_OPCODE;
 
