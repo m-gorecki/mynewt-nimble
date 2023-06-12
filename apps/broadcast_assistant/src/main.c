@@ -76,6 +76,7 @@ struct display_gui {
     lv_obj_t *return_btn;
     lv_obj_t *remove_src_btn;
     lv_obj_t *filter_broadcast_id_textarea;
+    lv_obj_t *filter_device_name_textarea;
     lv_obj_t *keyboard;
 };
 
@@ -92,7 +93,7 @@ struct filter_settings {
     int8_t rssi;
     uint8_t device_role;
     uint32_t source_broadcast_id;
-    char device_name[255];
+    char device_name[30];
 };
 
 struct paired_delegator {
@@ -140,6 +141,7 @@ static struct filter_settings filter_settings = {
         .rssi = -75,
         .device_role = DEVICE_ROLE_BROADCAST_SOURCE,
         .source_broadcast_id = 0,
+        .device_name = "",
 };
 
 static struct synced_source synced_source = {
@@ -1088,6 +1090,7 @@ static void
 handle_delegator_disc_report(struct ble_gap_ext_disc_desc *desc)
 {
     int id;
+    struct ble_hs_adv_fields fields;
 
     if (!is_device_scan_delegator(desc->data, desc->length_data) || desc->rssi < filter_settings.rssi) {
         return;
@@ -1096,6 +1099,13 @@ handle_delegator_disc_report(struct ble_gap_ext_disc_desc *desc)
     if (lv_obj_get_child_cnt(gui.devices_list) >= MAX_DEVICES) {
         lv_obj_del(gui.devices_list);
         devices_list_init();
+    }
+
+    ble_hs_adv_parse_fields(&fields, desc->data, desc->length_data);
+    if(strcmp(filter_settings.device_name, "")){
+        if (strncmp((char *) fields.name, filter_settings.device_name, strlen(filter_settings.device_name))) {
+            return;
+        }
     }
 
     id = get_device_id_by_addr(&desc->addr);
@@ -1116,6 +1126,7 @@ handle_source_disc_report(struct ble_gap_ext_disc_desc *desc)
 {
     int device_id;
     uint32_t ad_broadcast_id;
+    struct ble_hs_adv_fields fields;
 
     /* This function returning 0 means, that discovered device is not Broadcast Source */
     if (!parse_broadcast_audio_announcement(desc->data, desc->length_data,
@@ -1125,6 +1136,13 @@ handle_source_disc_report(struct ble_gap_ext_disc_desc *desc)
 
     if (filter_settings.source_broadcast_id != 0 && ad_broadcast_id != filter_settings.source_broadcast_id) {
         return;
+    }
+
+    ble_hs_adv_parse_fields(&fields, desc->data, desc->length_data);
+    if(strcmp(filter_settings.device_name, "")){
+        if (strncmp((char *) fields.name, filter_settings.device_name, strlen(filter_settings.device_name))) {
+            return;
+        }
     }
 
     if (lv_obj_get_child_cnt(gui.devices_list) >= MAX_DEVICES) {
@@ -1441,13 +1459,16 @@ filter_textareas_cb(lv_event_t *e)
         lv_keyboard_set_textarea(gui.keyboard, textarea);
     } else if (code == LV_EVENT_DEFOCUSED) {
         lv_obj_add_flag(gui.keyboard, LV_OBJ_FLAG_HIDDEN);
-        filter_settings.source_broadcast_id = strtoll(lv_textarea_get_text(textarea), NULL, 16);
-        printf("Broadcast id: %lx", filter_settings.source_broadcast_id);
+        if (textarea == gui.filter_broadcast_id_textarea) {
+            filter_settings.source_broadcast_id = strtoll(lv_textarea_get_text(textarea), NULL, 16);
+        } else if (textarea == gui.filter_device_name_textarea) {
+            strcpy(filter_settings.device_name, lv_textarea_get_text(textarea));
+        }
     }
 }
 
 static void
-filter_list_init(void)
+filters_list_init(void)
 {
     lv_obj_t *obj;
 
@@ -1470,9 +1491,17 @@ filter_list_init(void)
     lv_textarea_set_text(gui.filter_broadcast_id_textarea, "");
     lv_obj_add_event_cb(gui.filter_broadcast_id_textarea, filter_textareas_cb, LV_EVENT_ALL, NULL);
 
+    obj = lv_label_create(gui.filters_list);
+    lv_label_set_text(obj, "Device name:");
+
+    gui.filter_device_name_textarea = lv_textarea_create(gui.filters_list);
+    lv_obj_set_size(gui.filter_device_name_textarea, LV_PCT(60), 30);
+    lv_textarea_set_max_length(gui.filter_device_name_textarea, 30);
+    lv_textarea_set_text(gui.filter_device_name_textarea, "");
+    lv_obj_add_event_cb(gui.filter_device_name_textarea, filter_textareas_cb, LV_EVENT_ALL, NULL);
+
     gui.keyboard = lv_keyboard_create(lv_scr_act());
     lv_obj_add_flag(gui.keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_keyboard_set_textarea(gui.keyboard, gui.filter_broadcast_id_textarea);
     lv_obj_add_event_cb(gui.keyboard, keyboard_ready_cb, LV_EVENT_READY, NULL);
 
     obj = lv_label_create(gui.filters_list);
@@ -1495,7 +1524,7 @@ static void
 display_init(void)
 {
     style_init();
-    filter_list_init();
+    filters_list_init();
     subgroups_list_init();
     devices_list_init();
     btns_init();
