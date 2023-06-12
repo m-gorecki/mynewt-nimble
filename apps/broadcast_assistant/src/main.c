@@ -75,6 +75,8 @@ struct display_gui {
     lv_obj_t *filter_btn;
     lv_obj_t *return_btn;
     lv_obj_t *remove_src_btn;
+    lv_obj_t *filter_broadcast_id_textarea;
+    lv_obj_t *keyboard;
 };
 
 struct broadcast_device_data {
@@ -89,6 +91,8 @@ struct broadcast_device_data {
 struct filter_settings {
     int8_t rssi;
     uint8_t device_role;
+    uint32_t source_broadcast_id;
+    char device_name[255];
 };
 
 struct paired_delegator {
@@ -135,6 +139,7 @@ static struct broadcast_device_data devices[MAX_DEVICES];
 static struct filter_settings filter_settings = {
         .rssi = -75,
         .device_role = DEVICE_ROLE_BROADCAST_SOURCE,
+        .source_broadcast_id = 0,
 };
 
 static struct synced_source synced_source = {
@@ -1118,6 +1123,10 @@ handle_source_disc_report(struct ble_gap_ext_disc_desc *desc)
         return;
     }
 
+    if (filter_settings.source_broadcast_id != 0 && ad_broadcast_id != filter_settings.source_broadcast_id) {
+        return;
+    }
+
     if (lv_obj_get_child_cnt(gui.devices_list) >= MAX_DEVICES) {
         lv_obj_del(gui.devices_list);
         devices_list_init();
@@ -1415,6 +1424,29 @@ btns_init(void)
 }
 
 static void
+keyboard_ready_cb(lv_event_t *e)
+{
+    lv_obj_add_flag(gui.keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void
+filter_textareas_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t *textarea = lv_event_get_target(e);
+
+    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
+        lv_obj_clear_flag(gui.keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(gui.keyboard);
+        lv_keyboard_set_textarea(gui.keyboard, textarea);
+    } else if (code == LV_EVENT_DEFOCUSED) {
+        lv_obj_add_flag(gui.keyboard, LV_OBJ_FLAG_HIDDEN);
+        filter_settings.source_broadcast_id = strtoll(lv_textarea_get_text(textarea), NULL, 16);
+        printf("Broadcast id: %lx", filter_settings.source_broadcast_id);
+    }
+}
+
+static void
 filter_list_init(void)
 {
     lv_obj_t *obj;
@@ -1427,6 +1459,21 @@ filter_list_init(void)
 
     obj = lv_label_create(gui.filters_list);
     lv_label_set_text(obj, "Filter options");
+
+    obj = lv_label_create(gui.filters_list);
+    lv_label_set_text(obj, "Source broadcast ID (hex):");
+
+    gui.filter_broadcast_id_textarea = lv_textarea_create(gui.filters_list);
+    lv_obj_set_size(gui.filter_broadcast_id_textarea, LV_PCT(60), 30);
+    lv_textarea_set_accepted_chars(gui.filter_broadcast_id_textarea, "0123456789abcdefABCDEF");
+    lv_textarea_set_max_length(gui.filter_broadcast_id_textarea, 6);
+    lv_textarea_set_text(gui.filter_broadcast_id_textarea, "");
+    lv_obj_add_event_cb(gui.filter_broadcast_id_textarea, filter_textareas_cb, LV_EVENT_ALL, NULL);
+
+    gui.keyboard = lv_keyboard_create(lv_scr_act());
+    lv_obj_add_flag(gui.keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_keyboard_set_textarea(gui.keyboard, gui.filter_broadcast_id_textarea);
+    lv_obj_add_event_cb(gui.keyboard, keyboard_ready_cb, LV_EVENT_READY, NULL);
 
     obj = lv_label_create(gui.filters_list);
     lv_label_set_text(obj, "Minimum RSSI:");
