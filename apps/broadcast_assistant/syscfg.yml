@@ -72,6 +72,9 @@ syscfg.vals:
     LVGL_STMPE610: 1
     LVGL_XPT2046: 0
 
+    LV_FONT_UNSCII_8: 1
+    LV_FONT_DEFAULT: 'lv_font_unscii_8'
+
 syscfg.vals.LVGL_ST7735S:
     LCD_ITF: spi
     LCD_SPI_DEV_NAME: '"spi1"'
