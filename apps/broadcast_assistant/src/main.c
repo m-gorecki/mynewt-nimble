@@ -161,6 +161,7 @@ static void stop_scan(void);
 static void server_add_new_source(struct paired_delegator *delegator, uint8_t source_list_id, int8_t subgroup_idx, uint32_t bis_sync);
 static void server_modify_source(struct paired_delegator *delegator, int8_t subgroup_idx, uint32_t bis_sync, uint8_t pa_sync);
 static void server_remove_source(struct paired_delegator *delegator);
+static void gui_clear_list(void);
 
 static void
 switch_to_subgroups_list(void)
@@ -1147,8 +1148,7 @@ handle_delegator_disc_report(struct ble_gap_ext_disc_desc *desc)
     }
 
     if (lv_obj_get_child_cnt(gui.devices_list) >= MAX_DEVICES) {
-        lv_obj_del(gui.devices_list);
-        devices_list_init();
+        gui_clear_list();
     }
 
     ble_hs_adv_parse_fields(&fields, desc->data, desc->length_data);
@@ -1196,8 +1196,7 @@ handle_source_disc_report(struct ble_gap_ext_disc_desc *desc)
     }
 
     if (lv_obj_get_child_cnt(gui.devices_list) >= MAX_DEVICES) {
-        lv_obj_del(gui.devices_list);
-        devices_list_init();
+        gui_clear_list();
     }
 
     device_id = get_device_id_by_addr(&desc->addr);
@@ -1252,6 +1251,45 @@ stop_scan(void)
 }
 
 static void
+gui_clear_list(void)
+{
+    uint8_t list_entries_cnt = lv_obj_get_child_cnt(gui.devices_list);
+    uint8_t i;
+    uint8_t id_to_remove_from = 0;
+    lv_obj_t *list_entry_to_remove;
+
+    if (paired_delegators[0].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        lv_obj_move_to_index(devices[paired_delegators[0].list_id].list_entry, 0);
+        devices[0] = devices[paired_delegators[0].list_id];
+        paired_delegators[0].list_id = 0;
+        id_to_remove_from++;
+    }
+
+    if (paired_delegators[1].conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        if (id_to_remove_from > 0) {
+            lv_obj_move_to_index(devices[paired_delegators[1].list_id].list_entry, 1);
+            devices[1] = devices[paired_delegators[1].list_id];
+            paired_delegators[1].list_id = 1;
+        } else {
+            lv_obj_move_to_index(devices[paired_delegators[1].list_id].list_entry, 0);
+            devices[0] = devices[paired_delegators[1].list_id];
+            paired_delegators[1].list_id = 0;
+        }
+        id_to_remove_from++;
+    }
+
+    list_entry_to_remove = lv_obj_get_child(gui.devices_list, id_to_remove_from);
+    while (list_entry_to_remove != NULL) {
+        lv_obj_del(list_entry_to_remove);
+        list_entry_to_remove = lv_obj_get_child(gui.devices_list, id_to_remove_from);
+    }
+
+    for (i = id_to_remove_from; i < list_entries_cnt; i++) {
+        devices[i].list_entry = NULL;
+    }
+}
+
+static void
 start_scan(void)
 {
     int rc;
@@ -1265,6 +1303,8 @@ start_scan(void)
     uncoded.passive = 0;
     uncoded.itvl = BLE_GAP_SCAN_ITVL_MS(500);
     uncoded.window = BLE_GAP_SCAN_WIN_MS(500);
+
+    gui_clear_list();
 
     rc = ble_gap_ext_disc(BLE_OWN_ADDR_RANDOM, 0, 0, 0, 0,
                           0, &uncoded, &coded, scan_event, NULL);
