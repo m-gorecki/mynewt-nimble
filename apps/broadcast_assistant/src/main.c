@@ -108,6 +108,7 @@ struct paired_delegator {
 struct bis {
     uint8_t idx;
     lv_obj_t *list_entry;
+    uint8_t freq;
 };
 
 struct base_subgroup {
@@ -307,6 +308,9 @@ parse_synced_source_base(const uint8_t *base)
     int i;
     int j;
 
+    uint8_t codec_specific_configuration_len;
+    uint8_t codec_specific_field_len;
+
     /* First parameter we need is num_subgroups, which is 7th byte of advertising packet */
     base += 7;
     synced_source.num_subgroups = *(base++);
@@ -314,13 +318,23 @@ parse_synced_source_base(const uint8_t *base)
     /* fixme */
     assert(synced_source.num_subgroups <= MAX_SUBGROUPS);
 
-    for(i = 0; i < synced_source.num_subgroups; i++) {
+    for (i = 0; i < synced_source.num_subgroups; i++) {
         synced_source.subgroups[i].num_bis = *base;
 
         assert(synced_source.subgroups[i].num_bis <= MAX_BIS);
 
-        /* Skip parameters up to metadata_length[i] */
-        base += 7 + base[6];
+        /* Skip Codec_ID */
+        base += 6;
+
+        codec_specific_configuration_len = *(base++);
+        for (j = 0; j < codec_specific_configuration_len; j++) {
+            codec_specific_field_len = base[0];
+            if (base[1] == 0x01) {
+                synced_source.subgroups[i].bises[j].freq = base[2];
+            }
+            base += codec_specific_field_len + 1;
+            j += codec_specific_field_len;
+        }
 
         synced_source.subgroups[i].metadata_len = *(base++);
         memcpy(synced_source.subgroups[i].metadata, base, synced_source.subgroups[i].metadata_len);
@@ -454,6 +468,41 @@ subgroup_click_event_cb(lv_event_t *e)
     }
 }
 
+static int
+convert_bis_freq(uint8_t source_value)
+{
+    switch (source_value) {
+    case 0x01:
+        return 8000;
+    case 0x02:
+        return 11025;
+    case 0x03:
+        return 16000;
+    case 0x04:
+        return 22050;
+    case 0x05:
+        return 24000;
+    case 0x06:
+        return 32000;
+    case 0x07:
+        return 44100;
+    case 0x08:
+        return 48000;
+    case 0x09:
+        return 88200;
+    case 0x0A:
+        return 96000;
+    case 0x0B:
+        return 176400;
+    case 0x0C:
+        return 192000;
+    case 0x0D:
+        return 384000;
+    default:
+        return -1;
+    }
+}
+
 static void
 create_new_subgroups_list(void)
 {
@@ -516,7 +565,8 @@ create_new_subgroups_list(void)
             label = lv_label_create(obj);
             lv_label_set_text(label, "BIS\n");
             label = lv_label_create(obj);
-            lv_label_set_text_fmt(label, "%d", synced_source.subgroups[i].bises[j].idx);
+            lv_label_set_text_fmt(label, "%d: %dHz", synced_source.subgroups[i].bises[j].idx,
+                                  convert_bis_freq(2));
             lv_obj_add_event_cb(obj, bis_click_event_cb, LV_EVENT_ALL, NULL);
             lv_obj_set_style_bg_color(obj, lv_color_hex(COLOR_DEVICE), 0);
             synced_source.subgroups[i].bises[j].list_entry = obj;
