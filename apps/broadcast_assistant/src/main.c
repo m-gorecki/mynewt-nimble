@@ -133,7 +133,7 @@ static uint8_t g_own_addr_type;
 static uint8_t scanning = 0;
 static uint8_t create_new_subgroups_list_flag = 1;
 static uint8_t remove_source_flag = 0;
-static uint8_t sort_suspended = 0;
+//static uint8_t sort_suspended = 0;
 static struct display_gui gui;
 static struct broadcast_device_data devices[MAX_DEVICES];
 
@@ -181,16 +181,16 @@ switch_to_devices_list(void)
     lv_obj_add_flag(gui.remove_src_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
-static int
+/*static int
 rssi_compare(const void *p1, const void *p2)
 {
     const struct broadcast_device_data *d1 = p1;
     const struct broadcast_device_data *d2 = p2;
 
     return (d2->last_rssi - d1->last_rssi);
-}
+}*/
 
-static void
+/*static void
 sort_devices(void)
 {
     uint8_t i;
@@ -201,7 +201,7 @@ sort_devices(void)
     for (i = 0; i < devices_number; i++) {
         lv_obj_move_to_index(devices[i].list_entry, i);
     }
-}
+} */
 
 static int
 get_device_id_by_addr(ble_addr_t *addr)
@@ -861,7 +861,7 @@ entry_click_event_cb(lv_event_t *e)
     id = lv_obj_get_index(entry);
 
     if (filter_settings.device_role == DEVICE_ROLE_BROADCAST_SOURCE) {
-        sort_suspended = 1;
+        //sort_suspended = 1;
         if (!ble_gap_disc_active()) {
             start_scan();
         }
@@ -907,17 +907,17 @@ add_new_device(struct ble_gap_ext_disc_desc *desc, uint32_t broadcast_id)
 static void
 update_device(struct ble_gap_ext_disc_desc *desc, uint8_t id)
 {
-    uint8_t rssi_change;
+    //uint8_t rssi_change;
     fill_device_labels(desc, id);
 
     /* Sort the list if and update RSSI if it changed significantly */
-    if (!sort_suspended) {
+    /*if (!sort_suspended) {
         rssi_change = abs(devices[id].last_rssi - desc->rssi);
         if (rssi_change > 5) {
             devices[id].last_rssi = desc->rssi;
             sort_devices();
         }
-    }
+    } */
 }
 
 const LV_ATTRIBUTE_MEM_ALIGN LV_ATTRIBUTE_LARGE_CONST uint8_t device_list_bg_map[] = {
@@ -1113,9 +1113,9 @@ handle_delegator_disc_report(struct ble_gap_ext_disc_desc *desc)
     if (id < 0) {
         add_new_device(desc, UINT32_MAX);
         printf("New device\n");
-        if (!sort_suspended) {
+        /*if (!sort_suspended) {
             sort_devices();
-        }
+        }*/
     } else {
         update_device(desc, id);
     }
@@ -1154,9 +1154,9 @@ handle_source_disc_report(struct ble_gap_ext_disc_desc *desc)
 
     if (device_id < 0) {
         add_new_device(desc, ad_broadcast_id);
-        if (!sort_suspended) {
+        /*if (!sort_suspended) {
             sort_devices();
-        }
+        }*/
     } else {
         update_device(desc, device_id);
     }
@@ -1301,7 +1301,7 @@ return_btn_event_cb(lv_event_t *e)
     memset(&synced_source, 0, sizeof(synced_source));
     synced_source.list_id = LIST_ID_NONE;
 
-    sort_suspended = 0;
+    //sort_suspended = 0;
     switch_to_devices_list();
 }
 
