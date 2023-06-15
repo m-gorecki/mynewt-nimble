@@ -308,6 +308,7 @@ parse_synced_source_base(const uint8_t *base)
 {
     int i;
     int j;
+    int k;
 
     uint8_t codec_specific_configuration_len;
     uint8_t codec_specific_field_len;
@@ -328,13 +329,15 @@ parse_synced_source_base(const uint8_t *base)
         base += 6;
 
         codec_specific_configuration_len = *(base++);
-        for (j = 0; j < codec_specific_configuration_len; j++) {
+        for (k = 0; k < codec_specific_configuration_len; k++) {
             codec_specific_field_len = base[0];
             if (base[1] == 0x01) {
-                synced_source.subgroups[i].bises[j].freq = base[2];
+                for (j = 0; j < synced_source.subgroups[i].num_bis; j++) {
+                    synced_source.subgroups[i].bises[j].freq = base[2];
+                }
             }
             base += codec_specific_field_len + 1;
-            j += codec_specific_field_len;
+            k += codec_specific_field_len;
         }
 
         synced_source.subgroups[i].metadata_len = *(base++);
@@ -343,9 +346,16 @@ parse_synced_source_base(const uint8_t *base)
         base += synced_source.subgroups[i].metadata_len;
 
         for (j = 0; j < synced_source.subgroups[i].num_bis; j++) {
-            synced_source.subgroups[i].bises[j].idx = *base;
-            /* Skip Codec_Specific_Configuration */
-            base += base[1] + 2;
+            synced_source.subgroups[i].bises[j].idx = *(base++);
+            codec_specific_configuration_len = *(base++);
+            for (k = 0; k < codec_specific_configuration_len; k++) {
+                codec_specific_field_len = base[0];
+                if (base[1] == 0x01) {
+                    synced_source.subgroups[i].bises[j].freq = base[2];
+                }
+                base += codec_specific_field_len + 1;
+                k += codec_specific_field_len;
+            }
         }
     }
 }
@@ -567,7 +577,7 @@ create_new_subgroups_list(void)
             lv_label_set_text(label, "BIS\n");
             label = lv_label_create(obj);
             lv_label_set_text_fmt(label, "%d: %dHz", synced_source.subgroups[i].bises[j].idx,
-                                  convert_bis_freq(2));
+                                  convert_bis_freq(synced_source.subgroups[i].bises[j].freq));
             lv_obj_add_event_cb(obj, bis_click_event_cb, LV_EVENT_ALL, NULL);
             lv_obj_set_style_bg_color(obj, lv_color_hex(COLOR_DEVICE), 0);
             synced_source.subgroups[i].bises[j].list_entry = obj;
