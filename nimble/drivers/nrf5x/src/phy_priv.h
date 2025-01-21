@@ -96,7 +96,6 @@ int8_t phy_txpower_round(int8_t dbm);
 #endif
 #ifdef NRF54L_SERIES
 #define NRF_TIMER0 NRF_TIMER10
-#define NRF_DPPIC NRF_DPPIC10
 #define NRF_RTC0 NRF_RTC10
 #define NRF_AAR NRF_AAR00
 #define NRF_CCM NRF_CCM00
