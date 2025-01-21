@@ -63,6 +63,13 @@ uint16_t g_nrf_aar_output[127];
 
 #endif
 
+struct nrf_ecb_job_list {
+    nrf_vdma_job_t in[2];
+    nrf_vdma_job_t out[2];
+};
+
+static struct nrf_ecb_job_list g_ecb_job_list;
+
 #define NRF_ECB NRF_ECB00
 #define NRF_AAR NRF_AAR00
 
@@ -255,14 +262,29 @@ ble_hw_encrypt_block(struct ble_encryption_block *ecb)
     uint32_t end;
     uint32_t err;
 
+    /* Init job lists */
+    g_ecb_job_list.in[0].p_buffer = ecb->plain_text;
+    g_ecb_job_list.in[0].attributes = NRF_VDMA_ATTRIBUTE_CRC;
+    g_ecb_job_list.in[0].size = BLE_ENC_BLOCK_SIZE;
+    memset(&g_ecb_job_list.in[1], 0, sizeof(g_ecb_job_list.in[1]));
+
+    g_ecb_job_list.out[0].p_buffer = ecb->cipher_text;
+    g_ecb_job_list.out[0].attributes = NRF_VDMA_ATTRIBUTE_CRC;
+    g_ecb_job_list.out[0].size = BLE_ENC_BLOCK_SIZE;
+    memset(&g_ecb_job_list.out[1], 0, sizeof(g_ecb_job_list.out[1]));
+
     /* Stop ECB */
     nrf_ecb_task_trigger(NRF_ECB, NRF_ECB_TASK_STOP);
     /* XXX: does task stop clear these counters? Anyway to do this quicker? */
     NRF_ECB->EVENTS_END = 0;
     NRF_ECB->EVENTS_ERROR = 0;
-    NRF_ECB->IN.PTR = (uint32_t)ecb->plain_text;
-    NRF_ECB->OUT.PTR = (uint32_t)ecb->cipher_text;
-    memcpy((void *)NRF_ECB->KEY.VALUE, ecb->key, sizeof(uint32_t) * 4);
+    NRF_ECB->IN.PTR = (uint32_t)g_ecb_job_list.in;
+    NRF_ECB->OUT.PTR = (uint32_t)g_ecb_job_list.out;
+
+    NRF_ECB->KEY.VALUE[3] = get_be32(&ecb->key[0]);
+    NRF_ECB->KEY.VALUE[2] = get_be32(&ecb->key[4]);
+    NRF_ECB->KEY.VALUE[1] = get_be32(&ecb->key[8]);
+    NRF_ECB->KEY.VALUE[0] = get_be32(&ecb->key[12]);
 
     /* Start ECB */
     nrf_ecb_task_trigger(NRF_ECB, NRF_ECB_TASK_START);

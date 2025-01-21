@@ -132,12 +132,16 @@ struct nrf_aar_job_list {
 
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
 struct nrf_ccm_job_list {
-    nrf_vdma_job_t alen;
-    nrf_vdma_job_t mlen;
-    nrf_vdma_job_t adata;
-    nrf_vdma_job_t mdata;
-    nrf_vdma_job_t list_terminator;
+    uint16_t in_alen;
+    uint16_t in_mlen;
+    uint8_t  in_mlen_msb;
+    uint8_t  out_mlen_msb;
+    uint16_t out_alen;
+    nrf_vdma_job_t in[6];
+    nrf_vdma_job_t out[6];
 };
+
+struct nrf_ccm_job_list g_ccm_job_list;
 #endif
 
 /* BLE PHY data structure */
@@ -326,31 +330,6 @@ STATS_NAME_END(ble_phy_stats)
  *  Not sure what the end result of all this is. We will clear the pending
  *  bit in the NVIC just to be sure when we disable the PHY.
  */
-
-#if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
-
-/*
- * Per nordic, the number of bytes needed for scratch is 16 + MAX_PKT_SIZE.
- * However, when I used a smaller size it still overwrote the scratchpad. Until
- * I figure this out I am just going to allocate 67 words so we have enough
- * space for 267 bytes of scratch. I used 268 bytes since not sure if this
- * needs to be aligned and burning a byte is no big deal.
- */
-//#define NRF_ENC_SCRATCH_WORDS (((MYNEWT_VAL(BLE_LL_MAX_PKT_SIZE) + 16) + 3) / 4)
-#define NRF_ENC_SCRATCH_WORDS   (67)
-
-static uint32_t g_nrf_encrypt_scratchpad[NRF_ENC_SCRATCH_WORDS];
-
-struct nrf_ccm_data
-{
-    uint8_t key[16];
-    uint64_t pkt_counter;
-    uint8_t dir_bit;
-    uint8_t iv[8];
-} __attribute__((packed));
-
-struct nrf_ccm_data g_nrf_ccm_data;
-#endif
 
 #if MYNEWT_VAL(BLE_LL_PHY)
 
@@ -605,7 +584,7 @@ ble_phy_set_start_time(uint32_t cputime, uint8_t rem_us, bool tx)
      * If FEM is enabled, turn on time may be a bit longer, so we also allow to
      * adjust by 3 ticks so up to 90us which should be enough. If needed, we
      * can extend this by another tick but having FEM with turn on time >90us
-     * means transition may become tricky. TODO(m)
+     * means transition may become tricky.
      */
 
     if (min_rem_us <= -30) {
@@ -837,51 +816,85 @@ static void
 ble_phy_rx_xcvr_setup(void)
 {
     uint8_t *dptr;
-#if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
-    static struct nrf_ccm_job_list ccm_jobs;
-    static const uint16_t alen = 0;
-    uint16_t dlen;
-#endif
 
     dptr = (uint8_t *)&g_ble_phy_rx_buf[0];
     dptr += 3;
 
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
     if (g_ble_phy_data.phy_encrypted) {
-        dlen = g_ble_phy_rx_buf[1]; //TODO(m): check if this is accurate
+        /* AAD length */
+        g_ccm_job_list.in_alen = 1;
+        g_ccm_job_list.in[0].p_buffer = (uint8_t *) &g_ccm_job_list.in_alen;
+        g_ccm_job_list.in[0].size = sizeof(g_ccm_job_list.in_alen);
+        g_ccm_job_list.in[0].attributes = 11;
 
-        ccm_jobs.alen.size = 2;
-        ccm_jobs.alen.attributes = NRF_VDMA_ATTRIBUTE_CRC;
-        ccm_jobs.alen.p_buffer = (uint8_t *) &alen;
+        /* Encrypted message length LSB */
+        g_ccm_job_list.in[1].p_buffer = ((uint8_t *)g_ble_phy_enc_buf) + 1;
+        g_ccm_job_list.in[1].size = 1;
+        g_ccm_job_list.in[1].attributes = 12;
 
-        ccm_jobs.adata.size = alen;
-        ccm_jobs.adata.p_buffer = NULL;
-        ccm_jobs.adata.attributes = NRF_VDMA_ATTRIBUTE_PLAIN_DATA_BUF_WRITE;
+        /* Encrypted message length MSB */
+        g_ccm_job_list.in[2].p_buffer = &g_ccm_job_list.in_mlen_msb;
+        g_ccm_job_list.in[2].size = sizeof(g_ccm_job_list.in_mlen_msb);
+        g_ccm_job_list.in[2].attributes = 12;
 
-        ccm_jobs.mlen.size = 2;
-        ccm_jobs.mlen.attributes = NRF_VDMA_ATTRIBUTE_STATIC_ADDR;
-        ccm_jobs.mlen.p_buffer = (uint8_t *) &dlen;
+        /* AAD */
+        g_ccm_job_list.in[3].p_buffer = ((uint8_t *)g_ble_phy_enc_buf);
+        g_ccm_job_list.in[3].size = 1;
+        g_ccm_job_list.in[3].attributes = 13;
 
-        ccm_jobs.mdata.size = dlen;
-        ccm_jobs.mdata.p_buffer = (uint8_t *) &g_ble_phy_enc_buf;
-        ccm_jobs.mdata.attributes = 14; //TODO(m): ???
+        /* Encrypted message */
+        g_ccm_job_list.in[4].p_buffer = ((uint8_t *)g_ble_phy_enc_buf) + 3;
+        g_ccm_job_list.in[4].size = NRF_MAXLEN;
+        g_ccm_job_list.in[4].attributes = 14;
+
+        /* Job list terminator */
+        memset(&g_ccm_job_list.in[5], 0, sizeof(g_ccm_job_list.in[5]));
+
+        /* AAD length */
+        g_ccm_job_list.out[0].p_buffer = (uint8_t *) &g_ccm_job_list.out_alen;
+        g_ccm_job_list.out[0].size = sizeof(g_ccm_job_list.out_alen);
+        g_ccm_job_list.out[0].attributes = 11;
+
+        /* Decrypted message length LSB */
+        g_ccm_job_list.out[1].p_buffer = &dptr[1];
+        g_ccm_job_list.out[1].size = 1;
+        g_ccm_job_list.out[1].attributes = 12;
+
+        /* Decrypted message length MSB */
+        g_ccm_job_list.out[2].p_buffer = &g_ccm_job_list.out_mlen_msb;
+        g_ccm_job_list.out[2].size = sizeof(g_ccm_job_list.out_mlen_msb);
+        g_ccm_job_list.out[2].attributes = 12;
+
+        /* AAD */
+        g_ccm_job_list.out[3].p_buffer = &dptr[0];
+        g_ccm_job_list.out[3].size = 1;
+        g_ccm_job_list.out[3].attributes = 13;
+
+        /* Decrypted message */
+        g_ccm_job_list.out[4].p_buffer = &dptr[3];
+        g_ccm_job_list.out[4].size = NRF_MAXLEN - 4;
+        g_ccm_job_list.out[4].attributes = 14;
+
+        /* Job list terminator */
+        memset(&g_ccm_job_list.out[5], 0, sizeof(g_ccm_job_list.out[5]));
 
         NRF_RADIO->PACKETPTR = (uint32_t)&g_ble_phy_enc_buf[0];
-        NRF_CCM->IN.PTR = (uint32_t)&g_ble_phy_enc_buf[0];
-        NRF_CCM->OUT.PTR = (uint32_t)dptr;
-//        NRF_CCM->SCRATCHPTR = (uint32_t)&g_nrf_encrypt_scratchpad[0];
-        NRF_CCM->MODE = CCM_MODE_MACLEN_Pos | CCM_MODE_MODE_Decryption |
+        NRF_CCM->IN.PTR = (uint32_t)g_ccm_job_list.in;
+        NRF_CCM->OUT.PTR = (uint32_t)g_ccm_job_list.out;
+
+        NRF_CCM->MODE = (CCM_MODE_MACLEN_M4 << CCM_MODE_MACLEN_Pos) | CCM_MODE_MODE_Decryption |
                         ble_phy_get_ccm_datarate();
-        memcpy((uint8_t *)NRF_CCM->KEY.VALUE, &g_nrf_ccm_data.key, sizeof(g_nrf_ccm_data.key));
+
         NRF_CCM->EVENTS_ERROR = 0;
         NRF_CCM->EVENTS_END = 0;
-        nrf_ccm_task_trigger(NRF_CCM, NRF_CCM_TASK_START);
+
         phy_ppi_radio_address_to_ccm_crypt_enable();
     } else {
-        NRF_RADIO->PACKETPTR = (uint32_t)dptr;
+        NRF_RADIO->PACKETPTR = (uint32_t)&dptr[0];
     }
 #else
-    NRF_RADIO->PACKETPTR = (uint32_t)dptr;
+    NRF_RADIO->PACKETPTR = (uint32_t)&dptr[0];
 #endif
 
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LL_PRIVACY)
@@ -899,7 +912,7 @@ ble_phy_rx_xcvr_setup(void)
 
     /* Turn off trigger TXEN on output compare match and AAR on bcmatch */
     phy_ppi_timer0_compare0_to_radio_txen_disable();
-    phy_ppi_radio_bcmatch_to_aar_start_disable();
+    //phy_ppi_radio_bcmatch_to_aar_start_disable(); TODO(m): this was disabling CCM RADIO SUBSCRIBTION because peripherals share memory. think later what to do with it
 
     /* Reset the rx started flag. Used for the wait for response */
     g_ble_phy_data.phy_rx_started = 0;
@@ -1485,9 +1498,7 @@ ble_phy_init(void)
 
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
     nrf_ccm_int_disable(NRF_CCM, 0xffffffff);
-//    NRF_CCM->SHORTS = CCM_SHORTS_ENDKSGEN_CRYPT_Msk;
     NRF_CCM->EVENTS_ERROR = 0;
-    memset(g_nrf_encrypt_scratchpad, 0, sizeof(g_nrf_encrypt_scratchpad));
 #endif
 
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LL_PRIVACY)
@@ -1586,40 +1597,34 @@ ble_phy_rx(void)
 void
 ble_phy_encrypt_enable(const uint8_t *key)
 {
-    memcpy(g_nrf_ccm_data.key, key, 16);
+    NRF_CCM->KEY.VALUE[0] = get_be32(&key[12]);
+    NRF_CCM->KEY.VALUE[1] = get_be32(&key[8]);
+    NRF_CCM->KEY.VALUE[2] = get_be32(&key[4]);
+    NRF_CCM->KEY.VALUE[3] = get_be32(&key[0]);
+
     g_ble_phy_data.phy_encrypted = 1;
     NRF_AAR->ENABLE = AAR_ENABLE_ENABLE_Disabled;
     NRF_CCM->ENABLE = CCM_ENABLE_ENABLE_Enabled;
-#ifdef NRF5340_XXAA
-    NRF_CCM->HEADERMASK = BLE_LL_PDU_HEADERMASK_DATA;
-#endif
-#if PHY_USE_HEADERMASK_WORKAROUND
-    g_ble_phy_data.phy_headermask = BLE_LL_PDU_HEADERMASK_DATA;
-#endif
 }
 
 void
 ble_phy_encrypt_header_mask_set(uint8_t mask)
 {
-#ifdef NRF5340_XXAA
-    NRF_CCM->HEADERMASK = mask;
-#endif
-#if PHY_USE_HEADERMASK_WORKAROUND
-    g_ble_phy_data.phy_headermask = mask;
-#endif
+    NRF_CCM->ADATAMASK = mask;
 }
 
 void
 ble_phy_encrypt_iv_set(const uint8_t *iv)
 {
-    memcpy(g_nrf_ccm_data.iv, iv, 8);
+    NRF_CCM->NONCE.VALUE[1] = get_be32(iv);
+    NRF_CCM->NONCE.VALUE[0] = get_be32(iv + 4);
 }
 
 void
 ble_phy_encrypt_counter_set(uint64_t counter, uint8_t dir_bit)
 {
-    g_nrf_ccm_data.pkt_counter = counter;
-    g_nrf_ccm_data.dir_bit = dir_bit;
+    NRF_CCM->NONCE.VALUE[3] = ((uint8_t *)&counter)[0];
+    NRF_CCM->NONCE.VALUE[2] = get_be32(&((uint8_t *)&counter)[1]) | ((!!dir_bit) << 7);
 }
 
 void
@@ -1742,28 +1747,6 @@ ble_phy_rx_set_start_time(uint32_t cputime, uint8_t rem_usecs)
     return rc;
 }
 
-static void
-ble_phy_ccm_job_list_init(struct nrf_ccm_job_list *job_list, uint16_t *alen,
-                          uint16_t *dlen, uint8_t *dbuff)
-{
-    job_list->alen.size = 2;
-    job_list->alen.attributes = NRF_VDMA_ATTRIBUTE_CRC;
-    job_list->alen.p_buffer = (uint8_t *) alen;
-
-    job_list->adata.size = *alen;
-    job_list->adata.p_buffer = NULL;
-    job_list->adata.attributes = NRF_VDMA_ATTRIBUTE_PLAIN_DATA_BUF_WRITE;
-
-    job_list->mlen.size = 2;
-    job_list->mlen.attributes = NRF_VDMA_ATTRIBUTE_STATIC_ADDR;
-    job_list->mlen.p_buffer = (uint8_t *) dlen;
-
-    job_list->mdata.size = *dlen;
-    job_list->mdata.p_buffer = (uint8_t *) dbuff;
-    job_list->mdata.attributes = 14;
-
-}
-
 int
 ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
 {
@@ -1774,12 +1757,6 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
     uint8_t hdr_byte;
     uint32_t state;
     uint32_t shortcuts;
-#if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
-    static struct nrf_ccm_job_list ccm_jobs_in;
-    static struct nrf_ccm_job_list ccm_jobs_out;
-    static const uint16_t alen = 0;
-    uint16_t dlen;
-#endif
 
     if (g_ble_phy_data.phy_transition_late) {
         ble_phy_disable();
@@ -1808,12 +1785,11 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
     if (g_ble_phy_data.phy_encrypted) {
         dptr = (uint8_t *)&g_ble_phy_enc_buf[0];
         pktptr = (uint8_t *)&g_ble_phy_tx_buf[0];
-        NRF_CCM->IN.PTR = (uint32_t)dptr;
-        NRF_CCM->OUT.PTR = (uint32_t)pktptr;
-//        NRF_CCM->SCRATCHPTR = (uint32_t)&g_nrf_encrypt_scratchpad[0];
+        NRF_CCM->IN.PTR = (uint32_t)&g_ccm_job_list.in;
+        NRF_CCM->OUT.PTR = (uint32_t)&g_ccm_job_list.out;
+
         NRF_CCM->EVENTS_ERROR = 0;
-        NRF_CCM->MODE = CCM_MODE_MACLEN_Pos | ble_phy_get_ccm_datarate();
-        memcpy((uint8_t *)NRF_CCM->KEY.VALUE, &g_nrf_ccm_data.key, sizeof(g_nrf_ccm_data.key));
+        NRF_CCM->MODE = CCM_MODE_MODE_Encryption | (CCM_MODE_MACLEN_M4 << CCM_MODE_MACLEN_Pos) | ble_phy_get_ccm_datarate();
     } else {
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LL_PRIVACY)
         NRF_AAR->IN.PTR = (uint32_t)&g_nrf_irk_list[0];
@@ -1836,39 +1812,60 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
 
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
     if (g_ble_phy_data.phy_encrypted) {
-        ccm_jobs_in.alen.size = 2;
-        ccm_jobs_in.alen.attributes = NRF_VDMA_ATTRIBUTE_CRC;
-        ccm_jobs_in.alen.p_buffer = (uint8_t *) &alen;
+        /* AAD length */
+        g_ccm_job_list.in_alen = 1;
+        g_ccm_job_list.in[0].p_buffer = (uint8_t *) &g_ccm_job_list.in_alen;
+        g_ccm_job_list.in[0].size = sizeof(g_ccm_job_list.in_alen);
+        g_ccm_job_list.in[0].attributes = 11;
 
-        ccm_jobs_in.adata.size = alen;
-        ccm_jobs_in.adata.p_buffer = NULL;
-        ccm_jobs_in.adata.attributes = NRF_VDMA_ATTRIBUTE_PLAIN_DATA_BUF_WRITE;
+        /* Unencrypted message length */
+        g_ccm_job_list.in_mlen = payload_len;
+        g_ccm_job_list.in[1].p_buffer = (uint8_t *) &g_ccm_job_list.in_mlen;
+        g_ccm_job_list.in[1].size = sizeof(g_ccm_job_list.in_mlen);
+        g_ccm_job_list.in[1].attributes = 12;
 
-        ccm_jobs_in.mlen.size = 2;
-        ccm_jobs_in.mlen.attributes = NRF_VDMA_ATTRIBUTE_STATIC_ADDR;
-        ccm_jobs_in.mlen.p_buffer = (uint8_t *) &dlen;
+        /* AAD */
+        g_ccm_job_list.in[2].p_buffer = (uint8_t *) &dptr[0];
+        g_ccm_job_list.in[2].size = 1;
+        g_ccm_job_list.in[2].attributes = 13;
 
-        ccm_jobs_in.mdata.size = dlen;
-        ccm_jobs_in.mdata.p_buffer = (uint8_t *) dptr;
-        ccm_jobs_in.mdata.attributes = 14;
+        /* Unencrypted message */
+        g_ccm_job_list.in[3].p_buffer = (uint8_t *) &dptr[3];
+        g_ccm_job_list.in[3].size = payload_len;
+        g_ccm_job_list.in[3].attributes = 14;
 
-        ccm_jobs_out.alen.size = 2;
-        ccm_jobs_out.alen.attributes = 11;
-        ccm_jobs_out.alen.p_buffer = (uint8_t *) &alen;
+        /* Job list terminator */
+        memset(&g_ccm_job_list.in[4], 0, sizeof(g_ccm_job_list.in[4]));
 
-        ccm_jobs_out.adata.size = alen;
-        ccm_jobs_out.adata.attributes = 13;
-        ccm_jobs_out.adata.p_buffer = NULL;
+        /* AAD length */
+        g_ccm_job_list.out[0].p_buffer = (uint8_t *) &g_ccm_job_list.out_alen;
+        g_ccm_job_list.out[0].size = sizeof(g_ccm_job_list.out_alen);
+        g_ccm_job_list.out[0].attributes = 11;
 
-        ccm_jobs_out.mlen.size = 2;
-        ccm_jobs_out.mlen.attributes = 12;
-        ccm_jobs_out.mlen.p_buffer = (uint8_t *) &dlen;
+        /* Encrypted message length LSB */
+        g_ccm_job_list.out[1].p_buffer = (uint8_t *) &pktptr[1];
+        g_ccm_job_list.out[1].size = 1;
+        g_ccm_job_list.out[1].attributes = 12;
 
-        ccm_jobs_out.mdata.size = dlen;
-        ccm_jobs_out.mdata.attributes = 14;
-        ccm_jobs_out.mdata.p_buffer = (uint8_t *) pktptr;
+        /* Encrypted message length MSB */
+        g_ccm_job_list.out[2].p_buffer = (uint8_t *) &g_ccm_job_list.out_mlen_msb;
+        g_ccm_job_list.out[2].size = sizeof(g_ccm_job_list.out_mlen_msb);
+        g_ccm_job_list.out[2].attributes = 12;
 
-        /* Start key-stream generation and encryption (via short) */
+        /* AAD */
+        g_ccm_job_list.out[3].p_buffer = (uint8_t *) &pktptr[0];
+        g_ccm_job_list.out[3].size = 1;
+        g_ccm_job_list.out[3].attributes = 13;
+
+        /* Encrypted message */
+        g_ccm_job_list.out[4].p_buffer = (uint8_t *) &pktptr[3];
+        g_ccm_job_list.out[4].size = payload_len + 4;
+        g_ccm_job_list.out[4].attributes = 14;
+
+        /* Job list terminator */
+        memset(&g_ccm_job_list.out[5], 0, sizeof(g_ccm_job_list.out[5]));
+
+        /* Start encryption */
         nrf_ccm_task_trigger(NRF_CCM, NRF_CCM_TASK_START);
     }
 #endif
