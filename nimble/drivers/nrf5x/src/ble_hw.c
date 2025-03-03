@@ -36,10 +36,11 @@
 #include <nimble/nimble_npl_os.h>
 #endif
 #include "os/os_trace_api.h"
-#ifdef NRF_RNG_Type
+#ifndef NRF54L_SERIES
 #include <hal/nrf_rng.h>
 #endif
 #include "hal/nrf_ecb.h"
+#include "phy_priv.h"
 
 #ifdef NRF54L_SERIES
 #include <hal/nrf_cracen.h>
@@ -84,6 +85,9 @@ uint32_t g_nrf_irk_list[NRF_IRK_LIST_ENTRIES * 4];
 /* Current number of IRK entries */
 uint8_t g_nrf_num_irks;
 
+#ifdef NRF54L_SERIES
+struct nrf_aar_job_list g_aar_job_list;
+#endif
 #endif
 
 /* Returns public device address or -1 if not present */
@@ -628,6 +632,10 @@ ble_hw_resolv_list_size(void)
     return BLE_HW_RESOLV_LIST_SIZE;
 }
 
+uint32_t irk_first[400];
+uint8_t addr_xd[6*400];
+uint16_t counter_xd;
+
 /**
  * Called to determine if the address received was resolved.
  *
@@ -637,9 +645,14 @@ ble_hw_resolv_list_size(void)
 int
 ble_hw_resolv_list_match(void)
 {
-    if (NRF_AAR->ENABLE && NRF_AAR->EVENTS_END && NRF_AAR->EVENTS_RESOLVED) {
+    if ((NRF_AAR->ENABLE == AAR_ENABLE_ENABLE_Msk) && NRF_AAR->EVENTS_END) {
 #ifdef NRF54L_SERIES
-        return (int)NRF_AAR->ERRORSTATUS;
+        memcpy(irk_first + counter_xd, g_nrf_irk_list, sizeof(irk_first[0]));
+        memcpy(addr_xd + 6*counter_xd, g_aar_job_list.in[0].p_buffer, 6);
+        counter_xd++;
+        if (NRF_AAR->OUT.AMOUNT >= 2) {
+            return g_aar_job_list.out_buff[0];
+        }
 #else
         return (int)NRF_AAR->STATUS;
 #endif

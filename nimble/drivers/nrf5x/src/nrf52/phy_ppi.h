@@ -22,6 +22,8 @@
 
 #include <nrf_ppi.h>
 
+void ble_ll_hci_ev_send_vs_printf(uint8_t id, const char *fmt, ...);
+
 static inline void
 phy_ppi_rtc0_compare0_to_timer0_start_enable(void)
 {
@@ -62,12 +64,14 @@ static inline void
 phy_ppi_radio_bcmatch_to_aar_start_enable(void)
 {
     nrf_ppi_channels_enable(NRF_PPI, PPI_CHEN_CH23_Msk);
+    ble_ll_hci_ev_send_vs_printf(0, "aar_enable");
 }
 
 static inline void
 phy_ppi_radio_bcmatch_to_aar_start_disable(void)
 {
     nrf_ppi_channels_disable(NRF_PPI, PPI_CHEN_CH23_Msk);
+    ble_ll_hci_ev_send_vs_printf(0, "aar_disable");
 }
 
 static inline void

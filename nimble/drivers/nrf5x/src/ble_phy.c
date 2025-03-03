@@ -111,6 +111,7 @@ extern void tm_tick(void);
 /* XXX: private header file? */
 extern uint8_t g_nrf_num_irks;
 extern uint32_t g_nrf_irk_list[];
+bool g_debug_flag;
 
 /* To disable all radio interrupts */
 #ifdef NRF54L_SERIES
@@ -381,6 +382,12 @@ struct nrf_ccm_data
 } __attribute__((packed));
 
 struct nrf_ccm_data g_nrf_ccm_data;
+#endif
+#endif
+
+#if MYNEWT_VAL(BLE_LL_CFG_FEAT_LL_PRIVACY)
+#ifdef NRF54L_SERIES
+extern struct nrf_aar_job_list g_aar_job_list;
 #endif
 #endif
 
@@ -1085,8 +1092,8 @@ ble_phy_rx_xcvr_setup(void)
     if (g_ble_phy_data.phy_privacy) {
         NRF_AAR->ENABLE = AAR_ENABLE_ENABLE_Enabled;
 #ifdef NRF54L_SERIES
-        NRF_AAR->IN.PTR = (uint32_t)&g_nrf_irk_list[0];
-        /* TODO(m): Find replacement for NRF_AAR->SCRATCHPTR */
+        NRF_AAR->IN.PTR = (uint32_t)&g_aar_job_list.in;
+        NRF_AAR->OUT.PTR = (uint32_t)&g_aar_job_list.out;
 #else
         NRF_AAR->IRKPTR = (uint32_t)&g_nrf_irk_list[0];
         NRF_AAR->SCRATCHPTR = (uint32_t)&g_ble_phy_data.phy_aar_scratch;
@@ -1103,7 +1110,8 @@ ble_phy_rx_xcvr_setup(void)
 
     /* Turn off trigger TXEN on output compare match and AAR on bcmatch */
     phy_ppi_timer0_compare0_to_radio_txen_disable();
-    //phy_ppi_radio_bcmatch_to_aar_start_disable(); TODO(m): this was disabling CCM RADIO SUBSCRIBTION because peripherals share memory. think later what to do with it
+    phy_ppi_radio_bcmatch_to_aar_start_disable();
+    g_debug_flag = 0;
 
     /* Reset the rx started flag. Used for the wait for response */
     g_ble_phy_data.phy_rx_started = 0;
@@ -1563,7 +1571,18 @@ ble_phy_rx_start_isr(void)
          */
         adva_offset = (dptr[3] & 0x0f) == 0x07 ? 2 : 0;
 #ifdef NRF54L_SERIES
-        NRF_AAR->IN.PTR = (uint32_t)(dptr + 3 + adva_offset);
+        /* Hash */
+        g_aar_job_list.in[0].attributes = 11;
+        g_aar_job_list.in[0].size = 3;
+        g_aar_job_list.in[0].p_buffer = (dptr + 6 + adva_offset);
+
+        /* prand */
+        g_aar_job_list.in[1].attributes = 12;
+        g_aar_job_list.in[1].size = 3;
+        g_aar_job_list.in[1].p_buffer = (dptr + 9 + adva_offset);
+
+        NRF_AAR->IN.PTR = (uint32_t)&g_aar_job_list.in;
+        NRF_AAR->OUT.PTR = (uint32_t)&g_aar_job_list.out;
 #else
         NRF_AAR->ADDRPTR = (uint32_t)(dptr + 3 + adva_offset);
 #endif
@@ -1571,6 +1590,7 @@ ble_phy_rx_start_isr(void)
         /* Trigger AAR after last bit of AdvA is received */
         NRF_RADIO->EVENTS_BCMATCH = 0;
         phy_ppi_radio_bcmatch_to_aar_start_enable();
+        g_debug_flag = 1;
         nrf_radio_bcc_set(NRF_RADIO, (BLE_LL_PDU_HDR_LEN + adva_offset +
             BLE_DEV_ADDR_LEN) * 8 + g_ble_phy_data.phy_bcc_offset);
     }
@@ -1610,6 +1630,11 @@ ble_phy_isr(void)
      * we have both an ADDRESS and DISABLED interrupt in rx state. If we get
      * an address, we disable the DISABLED interrupt.
      */
+
+    if (NRF_RADIO->EVENTS_BCMATCH && g_debug_flag) {
+        ble_ll_hci_ev_send_vs_printf(0, "%x", NRF_RADIO->BCC);
+        NRF_AAR->EVENTS_NOTRESOLVED = 0;
+    }
 
     /* We get this if we have started to receive a frame */
     if ((irq_en & RADIO_INTENCLR_ADDRESS_Msk) && NRF_RADIO->EVENTS_ADDRESS) {
@@ -1740,6 +1765,9 @@ ble_phy_init(void)
 
     /* Disable all interrupts */
     nrf_radio_int_disable(NRF_RADIO, NRF_RADIO_IRQ_MASK_ALL);
+#ifdef NRF54L_SERIES
+    nrf_radio_int_enable(NRF_RADIO, RADIO_INTENSET00_BCMATCH_Msk);
+#endif
 
     /* Set configuration registers */
     NRF_RADIO->MODE = RADIO_MODE_MODE_Ble_1Mbit;
@@ -1791,7 +1819,25 @@ ble_phy_init(void)
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LL_PRIVACY)
     g_ble_phy_data.phy_aar_scratch = 0;
 #ifdef NRF54L_SERIES
-    NRF_AAR->IN.PTR = (uint32_t)&g_nrf_irk_list[0];
+    /* IRKs */
+    g_aar_job_list.in[2].attributes = 13;
+    g_aar_job_list.in[2].size = 32;
+    g_aar_job_list.in[2].p_buffer = (uint8_t *)&g_nrf_irk_list[0];
+
+    /* in job list terminator */
+    memset(&g_aar_job_list.in[3], 0, sizeof(g_aar_job_list.in[3]));
+
+    /* Output buffer */
+    g_aar_job_list.out[0].size = 4;
+    g_aar_job_list.out[0].attributes = 0x11;
+    g_aar_job_list.out[0].p_buffer = (uint8_t*) g_aar_job_list.out_buff;
+
+    /* out job list terminator */
+    memset(&g_aar_job_list.out[1], 0, sizeof(g_aar_job_list.out[1]));
+    memset(g_aar_job_list.out_buff, 0xaa, sizeof(g_aar_job_list.out_buff));
+
+    NRF_AAR->IN.PTR = (uint32_t)&g_aar_job_list.in;
+    NRF_AAR->OUT.PTR = (uint32_t)&g_aar_job_list.out;
 #else
     NRF_AAR->IRKPTR = (uint32_t)&g_nrf_irk_list[0];
 #endif
@@ -2105,7 +2151,7 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
      * all.
      */
     phy_ppi_wfr_disable();
-    phy_ppi_radio_bcmatch_to_aar_start_disable();
+    //phy_ppi_radio_bcmatch_to_aar_start_disable();
     phy_ppi_radio_address_to_ccm_crypt_disable();
 
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
@@ -2113,6 +2159,7 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
         dptr = (uint8_t *)&g_ble_phy_enc_buf[0];
         pktptr = (uint8_t *)&g_ble_phy_tx_buf[0];
 #ifdef NRF54L_SERIES
+        NRF_CCM->ENABLE = CCM_ENABLE_ENABLE_Enabled << CCM_ENABLE_ENABLE_Pos;
         NRF_CCM->IN.PTR = (uint32_t)&g_ccm_job_list.in;
         NRF_CCM->OUT.PTR = (uint32_t)&g_ccm_job_list.out;
         NRF_CCM->EVENTS_ERROR = 0;
@@ -2129,7 +2176,8 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
     } else {
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LL_PRIVACY)
 #ifdef NRF54L_SERIES
-        NRF_AAR->IN.PTR = (uint32_t)&g_nrf_irk_list[0];
+        NRF_AAR->IN.PTR = (uint32_t)&g_aar_job_list.in;
+        NRF_AAR->OUT.PTR = (uint32_t)&g_aar_job_list.out;
 #else
         NRF_AAR->IRKPTR = (uint32_t)&g_nrf_irk_list[0];
 #endif
@@ -2531,8 +2579,11 @@ void
 ble_phy_resolv_list_enable(void)
 {
 #ifdef NRF54L_SERIES
-    /* TODO: Is this the right replacement? */
-    NRF_AAR->MAXRESOLVED = (uint32_t)g_nrf_num_irks;
+    if (g_nrf_num_irks == 1) {
+        NRF_AAR->MAXRESOLVED = (uint32_t)g_nrf_num_irks + 1;
+    } else {
+        NRF_AAR->MAXRESOLVED = (uint32_t)g_nrf_num_irks;
+    }
 #else
     NRF_AAR->NIRK = (uint32_t)g_nrf_num_irks;
 #endif

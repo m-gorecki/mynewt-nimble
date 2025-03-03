@@ -102,6 +102,14 @@ int8_t phy_txpower_round(int8_t dbm);
 #define NRF_AAR NRF_AAR00
 #define NRF_GPIOTE NRF_GPIOTE20
 #include "nrf54l15/phy_ppi.h"
+#include "helpers/nrf_vdma.h"
+
+struct nrf_aar_job_list {
+    uint16_t out_buff[16];
+    nrf_vdma_job_t in[2 + 16]; //TODO(m)
+    nrf_vdma_job_t out[2];
+};
+
 #endif
 
 #endif /* H_PHY_PRIV_ */

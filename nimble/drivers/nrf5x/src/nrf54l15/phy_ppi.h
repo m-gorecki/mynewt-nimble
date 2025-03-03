@@ -20,6 +20,8 @@
 #ifndef H_PHY_PPI_
 #define H_PHY_PPI_
 
+#include "hal/nrf_aar.h"
+#include "hal/nrf_ccm.h"
 #define DPPI_CH_PUB(_ch)        (((DPPI_CH_ ## _ch) & 0xff) | (1 << 31))
 #define DPPI_CH_SUB(_ch)        (((DPPI_CH_ ## _ch) & 0xff) | (1 << 31))
 #define DPPI_CH_UNSUB(_ch)      (((DPPI_CH_ ## _ch) & 0xff) | (0 << 31))
@@ -27,12 +29,13 @@
 
 /* DPPIC00 [0:7] */
 #define DPPI_CH_RADIO_EVENTS_PAYLOAD_CCM        0
+#define DPPI_CH_RADIO_EVENTS_BCMATCH_AAR        1
 
 /* DPPIC10 [0:23] */
 #define DPPI_CH_TIMER0_EVENTS_COMPARE_0         0
 #define DPPI_CH_TIMER0_EVENTS_COMPARE_3         1
 #define DPPI_CH_RADIO_EVENTS_END                2
-#define DPPI_CH_RADIO_EVENTS_BCMATCH            3
+#define DPPI_CH_RADIO_EVENTS_BCMATCH_RADIO      3
 #define DPPI_CH_RADIO_EVENTS_ADDRESS            4
 #define DPPI_CH_RTC0_EVENTS_COMPARE_0           5
 #define DPPI_CH_TIMER0_EVENTS_COMPARE_2         6
@@ -98,25 +101,48 @@ phy_ppi_timer0_compare0_to_radio_rxen_disable(void)
 static inline void
 phy_ppi_radio_address_to_ccm_crypt_enable(void)
 {
+    if (NRF_AAR->ENABLE == (AAR_ENABLE_ENABLE_Enabled << AAR_ENABLE_ENABLE_Pos)) {
+        return;
+    }
+
     NRF_CCM->SUBSCRIBE_START = DPPI_CH_SUB(RADIO_EVENTS_PAYLOAD_CCM);
+    NRF_CCM->ENABLE = CCM_ENABLE_ENABLE_Enabled << CCM_ENABLE_ENABLE_Pos;
 }
 
 static inline void
 phy_ppi_radio_address_to_ccm_crypt_disable(void)
 {
+    if (NRF_AAR->ENABLE == (AAR_ENABLE_ENABLE_Enabled << AAR_ENABLE_ENABLE_Pos)) {
+        return;
+    }
+
+    NRF_CCM->ENABLE = CCM_ENABLE_ENABLE_Disabled << CCM_ENABLE_ENABLE_Pos;
     NRF_CCM->SUBSCRIBE_START = DPPI_CH_UNSUB(RADIO_EVENTS_PAYLOAD_CCM);
+    nrf_ccm_int_disable(NRF_CCM, 0xffffffff);
 }
 
 static inline void
 phy_ppi_radio_bcmatch_to_aar_start_enable(void)
 {
-    NRF_AAR->SUBSCRIBE_START = DPPI_CH_SUB(RADIO_EVENTS_BCMATCH);
+    if (NRF_CCM->ENABLE == (CCM_ENABLE_ENABLE_Enabled << CCM_ENABLE_ENABLE_Pos)) {
+        return;
+    }
+
+    NRF_AAR->MAXRESOLVED = 2;
+    NRF_AAR->SUBSCRIBE_START = DPPI_CH_SUB(RADIO_EVENTS_BCMATCH_AAR);
+    NRF_AAR->ENABLE = AAR_ENABLE_ENABLE_Enabled << AAR_ENABLE_ENABLE_Pos;
 }
 
 static inline void
 phy_ppi_radio_bcmatch_to_aar_start_disable(void)
 {
-    NRF_AAR->SUBSCRIBE_START = DPPI_CH_UNSUB(RADIO_EVENTS_BCMATCH);
+    if (NRF_CCM->ENABLE == (CCM_ENABLE_ENABLE_Enabled << CCM_ENABLE_ENABLE_Pos)) {
+        return;
+    }
+
+    NRF_AAR->ENABLE = AAR_ENABLE_ENABLE_Disabled << AAR_ENABLE_ENABLE_Pos;
+    NRF_AAR->SUBSCRIBE_START = DPPI_CH_UNSUB(RADIO_EVENTS_BCMATCH_AAR);
+    nrf_aar_int_disable(NRF_AAR, 0xffffffff);
 }
 
 static inline void
@@ -159,7 +185,7 @@ phy_ppi_disable(void)
     NRF_RADIO->SUBSCRIBE_DISABLE = DPPI_CH_UNSUB(TIMER0_EVENTS_COMPARE_3);
     NRF_RADIO->SUBSCRIBE_TXEN = DPPI_CH_UNSUB(TIMER0_EVENTS_COMPARE_0);
     NRF_RADIO->SUBSCRIBE_RXEN = DPPI_CH_UNSUB(TIMER0_EVENTS_COMPARE_0);
-    NRF_AAR->SUBSCRIBE_START = DPPI_CH_UNSUB(RADIO_EVENTS_BCMATCH);
+    NRF_AAR->SUBSCRIBE_START = DPPI_CH_UNSUB(RADIO_EVENTS_BCMATCH_AAR);
     NRF_CCM->SUBSCRIBE_START = DPPI_CH_UNSUB(RADIO_EVENTS_PAYLOAD_CCM);
 
     phy_ppi_fem_disable();
